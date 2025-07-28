@@ -1,0 +1,183 @@
+sp_configure 'show advanced options', 1;
+reconfigure;
+GO
+sp_configure 'xp_cmdshell', 1;
+reconfigure;
+GO
+USE [tempdb]
+GO
+IF EXISTS (select * from sys.tables where name = N'tblrdsXML')
+        DROP TABLE DBO.tblrdsXML;
+
+GO
+CREATE TABLE DBO.tblrdsXML(
+Id int identity,
+        rdsPath    varchar(900)    NOT NULL 
+,       rdsXML    XML             NOT NULL
+);
+GO
+IF EXISTS (select * from sys.tables where name = N'tblrdlXML')
+        DROP TABLE DBO.tblrdlXML;
+
+GO
+CREATE TABLE DBO.tblrdlXML(
+Id int identity,
+        rdlPath    varchar(900)    NOT NULL 
+,       rdlXML    XML             NOT NULL
+);
+GO
+IF OBJECT_ID('tempdb..#RDL_Definition') IS NOT NULL DROP TABLE #RDL_Definition
+GO
+CREATE TABLE #RDL_Definition (Id int identity,FilesName nvarchar(max),ReportDefinition nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#RDS_Inventory') IS NOT NULL DROP TABLE #RDS_Inventory
+GO
+CREATE TABLE #RDS_Inventory (Id int identity,FilesName nvarchar(max),Names nvarchar(max),Extension nvarchar(max),ConnectString nvarchar(max),DataSourceID nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#RDL_Inventory') IS NOT NULL DROP TABLE #RDL_Inventory
+GO
+CREATE TABLE #RDL_Inventory (Id int identity,FilesName nvarchar(max),ReportDatasource nvarchar(max),RptDataSourceReference nvarchar(max),RptDataSourceReferenceid nvarchar(max),DataSetName nvarchar(max),DatassetDataSoureName nvarchar(max),DatassetCommandText nvarchar(max));
+GO
+DECLARE	@Path	VARCHAR(2000); 
+SET @Path = '\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\SSRS reports\*.rds'; --Must be of form [drive letter]\...\*.dtsx
+DECLARE	@MyFiles TABLE (MyID INT IDENTITY(1,1) PRIMARY KEY, FullPath VARCHAR(2000));
+DECLARE	@CommandLine VARCHAR(4000) ;
+
+SELECT	@CommandLine =LEFT('dir "' + @Path + '" /A-D /B /S ',4000);
+INSERT	INTO @MyFiles (FullPath) 
+EXECUTE	xp_cmdshell @CommandLine;
+DELETE
+FROM	@MyFiles
+WHERE	FullPath IS NULL 
+OR		FullPath='File Not Found' 
+OR		FullPath = 'The system cannot find the path specified.'
+OR		FullPath = 'The system cannot find the file specified.'; 
+
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(MyID) , @MaxId = max(MyID) FROM @MyFiles
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+DECLARE	@FullPath	varchar(2000)= (select fullpath from @MyFiles where MyID=@Counter);
+declare	@sql	nvarchar(max);
+		SET @sql = '
+		INSERT	INTO DBO.tblrdsXML (rdsPath,rdsXML)
+		select  ''@FullPath'' as rdsPath
+		,		cast(BulkColumn as XML) as rdsXML
+		from    openrowset(bulk ''@FullPath'',
+								SINGLE_CLOB) as pkgColumn';
+		SELECT	@sql = REPLACE(@sql, '@FullPath', @FullPath);
+		EXEC	sp_executesql @sql;
+SET @Counter  = @Counter  + 1        
+END
+PRINT 'tblrdsXML COMPLETED';
+GO
+
+DECLARE	@Path	VARCHAR(2000); 
+SET @Path = '\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\SSRS reports\*.rdl'; --Must be of form [drive letter]\...\*.dtsx
+DECLARE	@MyrdlFiles TABLE (MyID INT IDENTITY(1,1) PRIMARY KEY, FullPath VARCHAR(2000));
+DECLARE	@CommandLine VARCHAR(4000) ;
+
+SELECT	@CommandLine =LEFT('dir "' + @Path + '" /A-D /B /S ',4000);
+INSERT	INTO @MyrdlFiles (FullPath) 
+EXECUTE	xp_cmdshell @CommandLine;
+DELETE
+FROM	@MyrdlFiles
+WHERE	FullPath IS NULL 
+OR		FullPath='File Not Found' 
+OR		FullPath = 'The system cannot find the path specified.'
+OR		FullPath = 'The system cannot find the file specified.'; 
+
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(MyID) , @MaxId = max(MyID) FROM @MyrdlFiles
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+DECLARE	@FullPath	varchar(2000)= (select fullpath from @MyrdlFiles where MyID=@Counter);
+declare	@sql	nvarchar(max);
+		SET @sql = '
+		INSERT	INTO DBO.tblrdlXML (rdlPath,rdlXML)
+		select  ''@FullPath'' as rdlPath
+		,		cast(BulkColumn as XML) as rdlXML
+		from    openrowset(bulk ''@FullPath'',
+								SINGLE_CLOB) as pkgColumn';
+		SELECT	@sql = REPLACE(@sql, '@FullPath', @FullPath);
+		EXEC	sp_executesql @sql;
+SET @Counter  = @Counter  + 1        
+END
+PRINT 'tblrdlXML COMPLETED';
+GO
+
+/*XML SEPERATION PHASE FOR RDS*/
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\SSRS reports\';
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) from dbo.tblrdsXML 
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+INSERT INTO #RDS_Inventory (FilesName,Names,Extension,ConnectString,DataSourceID)
+   SELECT 
+       replace(t.rdspath,@ROOT,'') as FilesName
+ 	 ,executables.Prop.value('@Name', 'nvarchar(max)')  AS Names
+	 ,executables.Prop.value('(/RptDataSource/ConnectionProperties/Extension)[1]','nvarchar(max)')  AS Extension
+	 ,executables.Prop.value('(/RptDataSource/ConnectionProperties/ConnectString)[1]','nvarchar(max)')  AS ConnectString
+	 ,executables.Prop.value('(DataSourceID)[1]','nvarchar(max)')  AS DataSourceID
+	 FROM   (SELECT rdspath,Cast(rdsXML AS XML) AS pkgXML FROM  dbo.tblrdsXML 
+				WHERE Id = @exeCounter ) t
+				CROSS APPLY pkgXML.nodes('//RptDataSource') executables(Prop)	;	
+  -- WHERE executables.Prop.value('data(./properties/property[@name=''SqlCommand''])[1]', 'varchar(max)') <>''
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#Report RDS COMPLETED';
+GO
+/*Report Definition SEPERATION PHASE FOR RDL*/
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\SSRS reports\';
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) from dbo.tblrdlXML 
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+INSERT INTO #RDL_Definition (FilesName,ReportDefinition)
+SELECT  
+ replace(t.RDLPATH,@ROOT,'') as FilesName, 
+executables.Prop.value('namespace-uri((/*)[1])','nvarchar(max)')  AS ReportDefinition
+FROM (  
+    SELECT RDLPATH, Cast(rdlXML AS XML) AS rdlxml FROM  dbo.tblrdlXML WHERE Id = @exeCounter
+    ) t
+CROSS APPLY rdlXML.nodes('/*') executables(Prop)
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#RDL_Definition COMPLETED';
+GO
+/*XML SEPERATION PHASE FOR RDL*/
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\SSRS reports\';
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) from dbo.tblrdlXML 
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+;WITH XMLNAMESPACES 
+( DEFAULT 
+  'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition'
+, 'http://schemas.microsoft.com/SQLServer/reporting/reportdesigner' AS ReportDefinition )
+INSERT INTO #RDL_Inventory (FilesName,ReportDatasource,RptDataSourceReference,RptDataSourceReferenceid,DataSetName,DatassetDataSoureName,DatassetCommandText)
+SELECT  
+ replace(t.RDLPATH,@ROOT,'') as FilesName
+,executables.Prop.value('(@Name)[1]', 'VARCHAR(250)')  AS ReportDatasource
+,executables.Prop.value('(DataSourceReference)[1]','VARCHAR(250)')  AS RptDataSourceReference
+,executables.Prop.value('declare namespace rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner";(rd:DataSourceID)[1]','VARCHAR(250)')  AS RptDataSourceReferenceid
+,xmlcolumn.value('(@Name)[1]', 'VARCHAR(250)') AS DataSetName  
+,xmlcolumn.value('(Query/DataSourceName)[1]','VARCHAR(250)') AS DatassetDataSoureName 
+,xmlcolumn.value('(Query/CommandText)[1]','VARCHAR(2500)')
+FROM (  
+    SELECT RDLPATH, Cast(rdlXML AS XML) AS rdlxml FROM  dbo.tblrdlXML WHERE Id = @exeCounter
+    ) t
+CROSS APPLY rdlXML.nodes('/Report/DataSources/DataSource') executables(Prop)
+CROSS APPLY rdlxml.nodes('/Report/DataSets/DataSet') xmltable ( xmlcolumn )
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#Report Data set COMPLETED';
+GO
+
+select * from #RDL_Definition
+select * from #RDL_Inventory
+select * from #RDS_Inventory
+
+
+
+
