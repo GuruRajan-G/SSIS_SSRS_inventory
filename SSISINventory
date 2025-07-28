@@ -1,0 +1,378 @@
+sp_configure 'show advanced options', 1;
+reconfigure;
+GO
+sp_configure 'xp_cmdshell', 1;
+reconfigure;
+GO
+USE [tempdb]
+GO
+/*Temp Table Creation*/
+IF OBJECT_ID('tempdb..#PackageFormatVersion') IS NOT NULL DROP TABLE #PackageFormatVersion
+GO
+CREATE TABLE #PackageFormatVersion (Id int identity,FilesName nvarchar(max),HardcodedPackageName nvarchar(max),LastModifiedProductVersion nvarchar(max),PackageFormatVersion nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#PackageVariables') IS NOT NULL DROP TABLE #PackageVariables
+GO
+CREATE TABLE #PackageVariables (Id int identity,FilesName nvarchar(max),VariableName nvarchar(max),VariableNamespace nvarchar(max),VariableExpression nvarchar(max),EvaluateAsExpression NVARCHAR(MAX),VariableValue NVARCHAR(MAX));
+GO
+IF OBJECT_ID('tempdb..#PackagelOGProvider') IS NOT NULL DROP TABLE #PackagelOGProvider
+GO
+CREATE TABLE #PackagelOGProvider (Id int identity,FilesName nvarchar(max),ConfigString nvarchar(max),CreationName nvarchar(max),Descriptions nvarchar(max),ObjectName NVARCHAR(MAX));
+GO
+IF OBJECT_ID('tempdb..#tempconnectionmanagerdetails') IS NOT NULL DROP TABLE #tempconnectionmanagerdetails
+GO
+CREATE TABLE #tempconnectionmanagerdetails (Id int identity,FilesName nvarchar(max),Connectionmanagerxml xml);
+GO
+IF OBJECT_ID('tempdb..#Mainconnectionmanagerdetails') IS NOT NULL DROP TABLE #Mainconnectionmanagerdetails
+GO
+CREATE TABLE #Mainconnectionmanagerdetails (Id int identity,FilesName nvarchar(max),ConnectionmanagerName nvarchar(max) ,ConnectionString nvarchar(max),Expression nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#splitexecutablexmlfrommainxml') IS NOT NULL DROP TABLE #splitexecutablexmlfrommainxml
+GO
+CREATE TABLE #splitexecutablexmlfrommainxml (Id int identity,FilesName nvarchar(max),Executables xml);
+GO
+IF OBJECT_ID('tempdb..#Mainexecutabledetails') IS NOT NULL DROP TABLE #Mainexecutabledetails
+GO
+CREATE TABLE #Mainexecutabledetails (Id int identity,FilesName nvarchar(max),RefName nvarchar(max),ExecutableName nvarchar(max),ExecutableDescription nvarchar(max),ExecutableType nvarchar(max) ,Executabletasxml xml);
+GO
+IF OBJECT_ID('tempdb..#EXEPROCESSexecutabledetails') IS NOT NULL DROP TABLE #EXEPROCESSexecutabledetails
+GO
+CREATE TABLE #EXEPROCESSexecutabledetails (Id int identity,FilesName nvarchar(max),RefName nvarchar(max),ExecutableName nvarchar(max),ExecutableDescription nvarchar(max),ExecutableType nvarchar(max) ,Executableexxe nvarchar(max),Arguments nvarchar(max),WorkingDirectory nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#esqltaskexecutabledetails') IS NOT NULL DROP TABLE #esqltaskexecutabledetails
+GO
+CREATE TABLE #esqltaskexecutabledetails (Id int identity,FilesName nvarchar(max),RefName nvarchar(max),ExecutableName nvarchar(max),ExecutableDescription nvarchar(max),ExecutableType nvarchar(max) ,query nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#dfttaskexecutabledetails') IS NOT NULL DROP TABLE #dfttaskexecutabledetails
+GO
+CREATE TABLE #dfttaskexecutabledetails (Id int identity,FilesName nvarchar(max),RefName nvarchar(max),ExecutableName nvarchar(max),ExecutableDescription nvarchar(max),ExecutableType nvarchar(max) ,DFTTaskREFID nvarchar(max),DFTTaskDESCRIPTION nvarchar(max),DFTTaskName nvarchar(max),DFTTaskSqlStatement nvarchar(max));
+GO
+IF OBJECT_ID('tempdb..#splitforeachxmlfrommainxml') IS NOT NULL DROP TABLE #splitforeachxmlfrommainxml
+GO
+CREATE TABLE #splitforeachxmlfrommainxml (Id int identity,FilesName nvarchar(max),Executables xml);
+GO
+IF OBJECT_ID('tempdb..#splitexecutablefromforeachxml') IS NOT NULL DROP TABLE #splitexecutablefromforeachxml
+GO
+CREATE TABLE #splitexecutablefromforeachxml (Id int identity,FilesName nvarchar(max),ForeachName nvarchar(max),Executables xml);
+GO
+IF OBJECT_ID('tempdb..#splittedexecutableofforeach') IS NOT NULL DROP TABLE #splittedexecutableofforeach
+GO
+CREATE TABLE #splittedexecutableofforeach (Id int identity,FilesName nvarchar(max),ForeachName nvarchar(max),Executables xml);
+GO
+IF OBJECT_ID('tempdb..#Mainforeachexecutabledetails') IS NOT NULL DROP TABLE #Mainforeachexecutabledetails
+GO
+CREATE TABLE #Mainforeachexecutabledetails (Id int identity,FilesName nvarchar(max),ForeachName nvarchar(max),ExecutableName nvarchar(max),ExecutableType nvarchar(max) ,ForeachExecutableName nvarchar(max));
+GO
+IF EXISTS (select * from sys.tables where name = N'tblPackageXML')
+        DROP TABLE DBO.tblPackageXML;
+
+GO
+CREATE TABLE DBO.tblPackageXML(
+Id int identity,
+        PackagePath    varchar(900)    NOT NULL 
+,       PackageXML    XML             NOT NULL
+);
+GO
+DECLARE	@Path	VARCHAR(2000); 
+SET @Path = '\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\*.dtsx'; --Must be of form [drive letter]\...\*.dtsx
+DECLARE	@MyFiles TABLE (MyID INT IDENTITY(1,1) PRIMARY KEY, FullPath VARCHAR(2000));
+DECLARE	@CommandLine VARCHAR(4000) ;
+
+SELECT	@CommandLine =LEFT('dir "' + @Path + '" /A-D /B /S ',4000);
+INSERT	INTO @MyFiles (FullPath) 
+EXECUTE	xp_cmdshell @CommandLine;
+DELETE
+FROM	@MyFiles
+WHERE	FullPath IS NULL 
+OR		FullPath='File Not Found' 
+OR		FullPath = 'The system cannot find the path specified.'
+OR		FullPath = 'The system cannot find the file specified.'; 
+
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(MyID) , @MaxId = max(MyID) FROM @MyFiles
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+DECLARE	@FullPath	varchar(2000)= (select fullpath from @MyFiles where MyID=@Counter);
+declare	@sql	nvarchar(max);
+		SET @sql = '
+		INSERT	INTO DBO.tblPackageXML (PackagePath,PackageXML)
+		select  ''@FullPath'' as PackagePath
+		,		cast(BulkColumn as XML) as PackageXML
+		from    openrowset(bulk ''@FullPath'',
+								SINGLE_CLOB) as pkgColumn';
+		SELECT	@sql = REPLACE(@sql, '@FullPath', @FullPath);
+		EXEC	sp_executesql @sql;
+SET @Counter  = @Counter  + 1        
+END
+PRINT 'tblPackageXML COMPLETED';
+GO
+/*XML SEPERATION PHASE*/
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #PackageFormatVersion (FilesName,HardcodedPackageName,LastModifiedProductVersion,PackageFormatVersion)
+SELECT
+        replace(t.PackagePath,@ROOT,'') as FilesName
+	   ,ObjectName.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)','nvarchar(max)')  AS HardcodedPackageName
+       ,ObjectName.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:LastModifiedProductVersion)','nvarchar(max)')  AS LastModifiedProductVersion
+       ,PackageFormatVersion.Prop.value('.', 'nvarchar(max)') AS PackageFormatVersion
+        FROM   (SELECT packagepath,Cast(PackageXML AS XML) AS pkgXML FROM   DBO.tblPackageXML where Id=@Counter) t
+                CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') ObjectName(Prop)
+			    CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:Property') PackageFormatVersion(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#PackageFormatVersion COMPLETED';
+GO
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #PackageVariables (FilesName,VariableName,VariableNamespace,VariableExpression,EvaluateAsExpression,VariableValue)
+SELECT
+        replace(t.PackagePath,@ROOT,'') as FilesName
+       ,Variable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)','nvarchar(max)')  AS VariableName
+       ,Variable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:Namespace)','nvarchar(max)')  AS VariableNamespace
+	   ,Variable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:Expression)','nvarchar(max)')  AS VariableExpression
+	   ,Variable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:EvaluateAsExpression)','nvarchar(max)')  AS EvaluateAsExpression
+	   ,Variable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";(p1:VariableValue)[1]','nvarchar(max)') AS VariableValue
+	    FROM   (SELECT packagepath,Cast(PackageXML AS XML) AS pkgXML FROM DBO.tblPackageXML where id=@Counter) t
+                CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:Variables/DTS:Variable') Variable(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#PackageVariables COMPLETED';
+GO
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #PackagelOGProvider (FilesName,ConfigString,CreationName,Descriptions,ObjectName)
+SELECT
+        replace(t.PackagePath,@ROOT,'') as FilesName
+       ,Logproviders.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ConfigString)','nvarchar(max)')  AS ConfigString
+       ,Logproviders.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:CreationName)','nvarchar(max)')  AS CreationName
+	   ,Logproviders.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:Description)','nvarchar(max)')  AS CreationName
+	   ,Logproviders.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)','nvarchar(max)')  AS ObjectName
+       FROM   (SELECT packagepath,Cast(PackageXML AS XML) AS pkgXML FROM DBO.tblPackageXML where id=@Counter) t
+                CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') ObjectName(Prop)
+			    CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:LogProviders/DTS:LogProvider') Logproviders(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#PackagelOGProvider COMPLETED';
+GO
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #tempconnectionmanagerdetails (FilesName,Connectionmanagerxml)
+SELECT 	   
+      replace(t.PackagePath,@ROOT,'') as FilesName
+	 ,Connectionmanager.Prop.query('.') as Connectionmanagerxml
+      FROM   (SELECT PackagePath,Cast(PackageXML AS XML) AS pkgXML FROM DBO.tblPackageXML WHERE Id=@Counter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') ObjectName(Prop)
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:ConnectionManagers/DTS:ConnectionManager') Connectionmanager(Prop)
+                ORDER BY replace(t.PackagePath,@ROOT,'');
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#tempconnectionmanagerdetails COMPLETED';
+GO
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #splitexecutablexmlfrommainxml (FilesName,Executables)
+SELECT 	   
+      replace(t.PackagePath,@ROOT,'') as FilesName
+	 ,PackageXML.query('declare namespace DTS="www.microsoft.com/SqlServer/Dts";
+	                   //DTS:Executable[@DTS:ExecutableType!=''STOCK:FOREACHLOOP''
+	                     and @DTS:ExecutableType!=''STOCK:SEQUENCE'' 
+						 and @DTS:ExecutableType!=''STOCK:FORLOOP''
+						 and not(contains(@DTS:ExecutableType,''Microsoft.Package''))]')  as Executablesxml
+	  FROM  DBO.tblPackageXML t WHERE Id=@Counter
+	  ORDER BY replace(t.PackagePath,@ROOT,'');
+	  SET @Counter  = @Counter  + 1        
+END
+PRINT '#splitexecutablexmlfrommainxml COMPLETED';
+GO
+DECLARE @ROOT NVARCHAR(MAX)='\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\MACESS\macess_ssis_azure-Master_10_17_24\';
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM DBO.tblPackageXML
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #splitforeachxmlfrommainxml (FilesName,Executables)
+SELECT 	   
+      replace(t.PackagePath,@ROOT,'') as FilesName
+	 ,PackageXML.query('declare namespace DTS="www.microsoft.com/SqlServer/Dts";//DTS:Executable[@DTS:ExecutableType=''STOCK:FOREACHLOOP'']')  as Executablesxml
+	  FROM  DBO.tblPackageXML t WHERE Id=@Counter
+	  ORDER BY replace(t.PackagePath,@ROOT,'');
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#splitforeachxmlfrommainxml COMPLETED';
+GO
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM #splitforeachxmlfrommainxml
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #splitexecutablefromforeachxml (FilesName,ForeachName,Executables)
+   SELECT 
+       t.FilesName
+	  ,ObjectName.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)', 'nvarchar(max)')  AS ForeachName
+      ,ObjectName.Prop.query('.')  AS ForeachinsideExecutablexml
+        FROM   (SELECT FilesName,Cast(Executables AS XML) AS pkgXML FROM   #splitforeachxmlfrommainxml WHERE Id=@Counter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') ObjectName(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#splitexecutablefromforeachxml COMPLETED';
+GO
+DECLARE @Counter INT,@MaxId INT
+SELECT @Counter = min(id) , @MaxId = max(id) FROM #splitexecutablefromforeachxml
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+INSERT INTO #splittedexecutableofforeach (FilesName,ForeachName,Executables)
+   SELECT 	 
+       t.FilesName
+	  ,t.ForeachName
+      ,Foreachinsideexecutable.Prop.query('.')  AS ForeachinsideExecutablexml
+        FROM   (SELECT FilesName,foreachname,Cast(Executables AS XML) AS pkgXML FROM   #splitexecutablefromforeachxml WHERE Id=@Counter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:Executables/DTS:Executable') Foreachinsideexecutable(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#splittedexecutableofforeach COMPLETED';
+GO
+/*XML TO MAIN TABLE PHASE*/
+DECLARE @Counter INT,@MaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @Counter = min(Id) , @MaxId = max(Id) FROM #tempconnectionmanagerdetails
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+   INSERT INTO #Mainconnectionmanagerdetails (FilesName,ConnectionmanagerName,ConnectionString)
+   SELECT 	   distinct
+      t.FilesName
+     ,Connectionmanager.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)', 'nvarchar(max)')  AS ConnectionmanagerName
+     ,ConnectionString.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ConnectionString)', 'nvarchar(max)')  AS ConnectionString
+        FROM   (SELECT FilesName,Cast(Connectionmanagerxml AS XML) AS pkgXML FROM   #tempconnectionmanagerdetails WHERE Id = @Counter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:ConnectionManager') Connectionmanager(Prop)
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:ConnectionManager/DTS:ObjectData/DTS:ConnectionManager') ConnectionString(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#Mainconnectionmanagerdetails COMPLETED';
+GO
+DECLARE @Counter INT,@MaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @Counter = min(Id) , @MaxId = max(Id) FROM #splittedexecutableofforeach
+WHILE(@Counter IS NOT NULL AND @Counter <= @MaxId)
+BEGIN
+   INSERT INTO #Mainforeachexecutabledetails (FilesName,ForeachName,ExecutableName,ExecutableType)
+   SELECT  distinct
+      t.FilesName
+	 ,t.ForeachName
+     ,Foreachinsideexecutable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)', 'nvarchar(max)')  AS ExecutableName
+     ,Foreachinsideexecutable.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ExecutableType)', 'nvarchar(max)')  AS ExecutableType
+      FROM   (SELECT FilesName,ForeachName,Cast(Executables AS XML) AS pkgXML FROM   #splittedexecutableofforeach WHERE Id = @Counter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') Foreachinsideexecutable(Prop);
+   SET @Counter  = @Counter  + 1        
+END
+PRINT '#Mainforeachexecutabledetails COMPLETED';
+GO
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) FROM #splitexecutablexmlfrommainxml
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+   INSERT INTO #Mainexecutabledetails (FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Executabletasxml)
+   SELECT 
+      t.FilesName
+	 ,executables.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:refId)', 'nvarchar(max)')  AS RefName
+     ,executables.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ObjectName)', 'nvarchar(max)')  AS ExecutableName
+	 ,executables.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:Description)', 'nvarchar(max)')  AS ExecutableName
+     ,executables.Prop.value('declare namespace p1="www.microsoft.com/SqlServer/Dts";string(./@p1:ExecutableType)', 'nvarchar(max)')  AS ExecutableType
+	 ,executables.Prop.query('.') as Executabletasxml
+	  FROM   (SELECT FilesName,Cast(Executables AS XML) AS pkgXML FROM   #splitexecutablexmlfrommainxml WHERE Id = @exeCounter) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable') executables(Prop);		
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#Mainexecutabledetails COMPLETED';
+GO
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) FROM #Mainexecutabledetails where ExecutableDescription='Execute Process Task'
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+   INSERT INTO #EXEPROCESSexecutabledetails (FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Executableexxe,Arguments,WorkingDirectory)
+   SELECT 
+      t.FilesName,t.RefName,t.ExecutableName,t.ExecutableDescription,t.ExecutableType
+	 ,executables.Prop.value('@Executable', 'nvarchar(max)')  AS Executableexxe
+	 ,executables.Prop.value('@Arguments', 'nvarchar(max)')  AS Arguments
+	 ,executables.Prop.value('@WorkingDirectory', 'nvarchar(max)')  AS WorkingDirectory
+	  FROM   (SELECT FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Cast(Executabletasxml AS XML) AS pkgXML FROM   #Mainexecutabledetails 
+	          WHERE Id = @exeCounter AND ExecutableDescription='Execute Process Task' ) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";/DTS:Executable/DTS:ObjectData/ExecuteProcessData') executables(Prop);		
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#EXEPROCESSexecutabledetails COMPLETED';
+GO
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) FROM #Mainexecutabledetails where ExecutableDescription='Execute SQL Task' 
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+   INSERT INTO #esqltaskexecutabledetails (FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Query)
+   SELECT 
+      t.FilesName,t.RefName,t.ExecutableName,t.ExecutableDescription,t.ExecutableType
+	 ,executables.Prop.value('declare namespace p1="www.microsoft.com/sqlserver/dts/tasks/sqltask";string(./@p1:SqlStatementSource)', 'nvarchar(max)')  AS Query
+	  FROM   (SELECT FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Cast(Executabletasxml AS XML) AS pkgXML FROM   #Mainexecutabledetails 
+	            WHERE Id = @exeCounter AND ExecutableDescription='Execute SQL Task' ) t
+				CROSS APPLY pkgXML.nodes('declare namespace DTS="www.microsoft.com/SqlServer/Dts";declare namespace SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask";//DTS:ObjectData//SQLTask:SqlTaskData') executables(Prop)	;	
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#esqltaskexecutabledetails COMPLETED';
+GO
+DECLARE @exeCounter INT,@exeMaxId INT,@PackageFilesName NVARCHAR(max)
+SELECT @exeCounter = min(Id) , @exeMaxId = max(Id) from #Mainexecutabledetails where ExecutableDescription='Data Flow Task'
+WHILE(@exeCounter IS NOT NULL AND @exeCounter <= @exeMaxId)
+BEGIN
+;WITH XMLNAMESPACES ('www.microsoft.com/SqlServer/Dts' AS DTS,'www.microsoft.com/sqlserver/dts/tasks/sqltask' AS SQLTask) 
+INSERT INTO #dfttaskexecutabledetails (FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,DFTTaskREFID,DFTTaskDESCRIPTION,DFTTaskName,DFTTaskSqlStatement)
+   SELECT 
+      --executables.Prop.query('.') as sss,
+      t.FilesName,t.RefName,t.ExecutableName,t.ExecutableDescription,t.ExecutableType
+	 ,executables.Prop.value('@refId', 'nvarchar(max)')  AS DFTTaskREFID
+	 ,executables.Prop.value('@description', 'nvarchar(max)')  AS DFTTaskDESCRIPTION
+	 ,executables.Prop.value('@name', 'nvarchar(max)')  AS DFTTaskName
+	 ,CASE WHEN executables.Prop.value('data(./properties/property[@name=''SqlCommand''])[1]', 'varchar(max)') <>''
+	  THEN executables.prop.value('data(./properties/property[@name=''SqlCommand''])[1]', 'varchar(max)') 
+	  WHEN executables.Prop.value('data(./properties/property[@name=''OpenRowset''])[1]', 'varchar(max)') <>''
+	  THEN executables.prop.value('data(./properties/property[@name=''OpenRowset''])[1]', 'varchar(max)') 
+	  END as DFTTaskSqlStatement
+	 FROM   (SELECT FilesName,RefName,ExecutableName,ExecutableDescription,ExecutableType,Cast(Executabletasxml AS XML) AS pkgXML FROM   #Mainexecutabledetails 
+				WHERE Id = @exeCounter AND ExecutableDescription='Data Flow Task') t
+				CROSS APPLY pkgXML.nodes('//DTS:Executable//pipeline//components//component') executables(Prop)	;	
+  -- WHERE executables.Prop.value('data(./properties/property[@name=''SqlCommand''])[1]', 'varchar(max)') <>''
+   SET @exeCounter  = @exeCounter  + 1        
+END
+PRINT '#dfttaskexecutabledetails COMPLETED';
+GO
+--select * from #splitexecutablexmlfrommainxml WHERE FilesName='AIM_Batch Letters.dtsx'
+
+--/*Whole Package xml*/
+--SELECT * FROM DBO.tblPackageXML WHERE FilesName='AIM_Batch Letters.dtsx'
+--/*Packagename and PackageFormatversion*/
+--SELECT * FROM #PACKAGEFORMATVERSION WHERE FilesName='AIM_Batch Letters.dtsx'
+--/*Packagename and ConnectionManager and ConnectionString*/
+--SELECT * FROM #tempconnectionmanagerdetails WHERE FilesName='AIM_Batch Letters.dtsx'
+--SELECT * FROM #Mainconnectionmanagerdetails WHERE FilesName='AIM_Batch Letters.dtsx'
+--SELECT * FROM #splitforeachxmlfrommainxml WHERE FilesName='AIM_Batch Letters.dtsx'
+--select * from #splitexecutablefromforeachxml WHERE FilesName='AIM_Batch Letters.dtsx'
+--select * from #splittedexecutableofforeach WHERE FilesName='AIM_Batch Letters.dtsx'
+--select * from #Mainforeachexecutabledetails WHERE FilesName='AIM_Batch Letters.dtsx' order by ForeachName 
+
+/*Results*/
+--select * from  DBO.tblPackageXML
+SELECT * FROM #PACKAGEFORMATVERSION WHERE FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+SELECT * FROM #PackageVariables WHERE FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+SELECT * FROM #PackagelOGProvider WHERE FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+SELECT * FROM #Mainconnectionmanagerdetails WHERE FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+select * FROM #Mainexecutabledetails WHERE  FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+select * from #EXEPROCESSexecutabledetails WHERE  FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+select * from #esqltaskexecutabledetails WHERE  FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
+select * from #dfttaskexecutabledetails WHERE  FilesName='Jupiter_Supplemental_BenefitType_Load.dtsx'
