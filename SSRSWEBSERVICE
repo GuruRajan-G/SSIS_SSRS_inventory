@@ -1,0 +1,328 @@
+CLS
+function Get-RsDataSource
+{
+    <#
+    .SYNOPSIS
+        This script retrieves information about data source on Report Server.
+
+    .DESCRIPTION
+        This script retrieves information about data source found at the specified location on Report Server.
+
+    .PARAMETER ReportServerUri (optional)
+        Specify the Report Server URL to your SQL Server Reporting Services Instance.
+
+    .PARAMETER ReportServerCredentials (optional)
+        Specify the password to use when connecting to your SQL Server Reporting Services Instance.
+
+    .PARAMETER Proxy (optional)
+        Specify the Proxy to use when communicating with Reporting Services server. If Proxy is not specified, connection to Report Server will be created using ReportServerUri, ReportServerUsername and ReportServerPassword.
+
+    .PARAMETER DataSourcePath
+        Specify the path to the data source.
+
+    .EXAMPLE
+        Get-RsDataSource -DataSourcePath '/path/to/my/datasource'
+        Description
+        -----------
+        This command will establish a connection to the Report Server located at http://localhost/reportserver using current user's credentials and retrieve details of data source found at '/path/to/my/datasource'.
+    
+    .EXAMPLE
+        Get-RsDataSource -ReportServerUri 'http://remote-machine:8080/reportserver_sql16' -DataSourcePath '/path/to/my/datasource'
+        Description
+        -----------
+        This command will establish a connection to the Report Server located at http://remote-machine:8080/reportserver_sql16 using current user's credentials and retrieve details of data source found at '/path/to/my/datasource'.
+
+    .EXAMPLE
+        Get-RsDataSource -ReportServerUri 'http://remote-machine:8080/reportserver_sql16' -ReportServerCredentials 'CaptainAwesome' -DataSourcePath '/path/to/my/datasource'
+        Description
+        -----------
+        This command will establish a connection to the Report Server located at http://remote-machine:8080/reportserver_sql16 using CaptainAwesome's credentials and retrieve details of data source found at '/path/to/my/datasource'.
+    #>
+
+    [cmdletbinding()]
+    param
+    (
+        [string]
+        $ReportServerUri = 'http://localhost/reportserver',
+
+        [System.Management.Automation.PSCredential]
+        $ReportServerCredentials,
+
+        $Proxy,
+
+        [Parameter(Mandatory=$True)]
+        [string]
+        $DataSourcePath
+    )
+
+    if (-not $Proxy) 
+    {
+        $Proxy = New-RSWebServiceProxy -ReportServerUri $ReportServerUri -Credentials $ReportServerCredentials
+    }
+    
+    try
+    {
+        Write-Verbose "Retrieving data source contents..."
+        $Proxy.GetDataSourceContents($DataSourcePath)
+        Write-Information "Data source retrieved successfully!"
+    }
+    catch
+    {
+        Write-Error "Exception while retrieving datasource! $($_.Exception.Message)"
+        break
+    }
+}
+
+<#######################
+.SYNOPSIS
+    Gets the SSRS reference
+ 
+.DESCRIPTION
+    The main SSRS reference from which all other things need to be done
+ 
+.INPUTS
+    The report server URI 
+ 
+.OUTPUTS
+    Returns SSRS reference
+ 
+.EXAMPLE 
+ 
+    Get-SSRS `
+            -ReportServerUri 'http://MYSERVER/MYINSTReportServer/ReportService2010.asmx'
+ 
+.NOTES 
+ 
+    Based on http://stackoverflow.com/questions/9178685/change-datasource-of-ssrs-report-with-powershell
+ 
+Version History
+    v1.0   - Jana Sattainathan - Apr.24.2017
+ 
+.LINK
+    N/A
+#>
+function Global:Get-SSRS
+{
+    [CmdletBinding()]
+    param( 
+ 
+        [Parameter(Mandatory=$true)]
+        [string] $ReportServerUri
+ 
+    )
+ 
+    [string] $fn = $MyInvocation.MyCommand
+    [string] $stepName = "Begin [$fn]"   
+ 
+    [string] $reportServerURIOverride = $ReportServerUri
+    [object] $returnObj = $null
+ 
+    try
+    {        
+ 
+        $stepName = "[$fn]: Validate parameters"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        #Append the "?wsdl" at the end if it does not already have it
+        # e.g., 'http://MYSERVER/MYINSTReportServer/ReportService2010.asmx?wsdl'
+ 
+        if (-not $reportServerURIOverride.EndsWith('?wsdl'))
+        {
+            $reportServerURIOverride = ("$reportServerURIOverride"+'?wsdl')
+        }
+ 
+        $stepName = "[$fn]: Open SSRS url"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        $URI = New-Object System.Uri($ReportServerUri)
+        $username= 'AN563107AD@ad.wellpoint.com'
+        $password='#ZeD27rR8K5A!YpyRH6V'
+               $SSRS = New-WebServiceProxy -Uri $URI -UseDefaultCredential
+ 
+        $returnObj = $SSRS
+ 
+        #Return value
+        ,$returnObj       
+ 
+    }
+    catch
+    {
+        [Exception]$ex = $_.Exception
+        Throw "Unable to get SSRS reference. Error in step: `"{0}]`" `n{1}" -f `
+                        $stepName, $ex.Message
+    }
+    finally
+    {
+        #Return value if any
+    }
+}
+<#
+.SYNOPSIS
+    Gets the SSRS data sources given an URI
+ 
+.DESCRIPTION
+    Gets the list of all data sources or a specific datasource based on supplied parameters
+ 
+.INPUTS
+    The report server URI and optionally a datasource
+ 
+.OUTPUTS
+    Returns data sources
+ 
+.EXAMPLE
+    #Gets a specific report
+    Get-SSRSReport `
+            -ReportServerUri 'http://MYSERVER/MYINSTReportServer/ReportService2010.asmx' `
+            -ReportFolderPath '/Technical Reports' `
+            -ReportName 'SubProducts'
+ 
+.EXAMPLE
+    #Gets a all reports in a folder
+    Get-SSRSReport `
+            -ReportServerUri 'http://MYSERVER/MYInstReportServer/ReportService2010.asmx' `
+            -ReportFolderPath '/Technical Reports'
+ 
+.EXAMPLE
+    #Gets all reports in all folders
+    Get-SSRSReport `
+            -ReportServerUri 'http://MYSERVER/MYINSTReportServer/ReportService2010.asmx'
+ 
+.EXAMPLE
+    #Gets all reports in all folders and counts the number of datasources
+ 
+    $ReportServerUri = 'http://MYSERVER/MYINSTReportServer/ReportService2010.asmx'
+    $SSRS = Get-SSRS -ReportServerUri $ReportServerUri
+ 
+    $reports = Get-SSRSReport `
+                 -ReportServerUri $ReportServerUri
+ 
+    foreach($report in $reports)
+    {
+ 
+        $dataSources = $SSRS.GetItemDataSources($report.Path)
+ 
+        "Data sources for [{0}]" -f $report.Path
+        $dataSources.Name
+ 
+        "----------------------------------------------"
+    }
+ 
+.NOTES 
+ 
+    Based on http://stackoverflow.com/questions/9178685/change-datasource-of-ssrs-report-with-powershell
+ 
+Version History
+    v1.0   - Jana Sattainathan - Apr.21.2017
+ 
+.LINK
+    N/A
+#>
+function Global:Get-SSRSReport
+{
+    [CmdletBinding()]
+    param( 
+ 
+        [Parameter(Mandatory=$true)]
+        [string] $ReportServerUri,
+ 
+        [Parameter(Mandatory=$false)]
+        [string] $ReportFolderPath = '/',
+ 
+        [Parameter(Mandatory=$false)]
+        [string] $ReportName = ''
+ 
+    )
+ 
+    [string] $fn = $MyInvocation.MyCommand
+    [string] $stepName = "Begin [$fn]"   
+ 
+    #-----------------------------------
+    #We need to collect all these inputs!
+    #-----------------------------------
+    [object[]] $returnObj = @()
+ 
+    try
+    {        
+ 
+        $stepName = "[$fn]: Validate parameters"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        $stepName = "[$fn]: Open SSRS url"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        $SSRS = Get-SSRS -ReportServerUri $ReportServerUri
+ 
+        $stepName = "[$fn]: Get all the reports"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        $reports = $SSRS.ListChildren($ReportFolderPath, $true) | Where-Object {$_.TypeName -eq 'Report'}
+ 
+        #Result will be of the form (first element):
+        <#         $reports[0]             ID                    : 0b767817-1c39-4a86-98e5-ab372f80dc64             Name                  : MyReport             Path                  : /MyApp/MyReport             VirtualPath           :              TypeName              : Folder             Size                  : 0             SizeSpecified         : False             Description           :              Hidden                : False             HiddenSpecified       : False             CreationDate          : 1/14/2015 11:11:43 AM             CreationDateSpecified : True             ModifiedDate          : 1/14/2015 11:11:59 AM             ModifiedDateSpecified : True             CreatedBy             : MYUSERID             ModifiedBy            : MYUSERID             ItemMetadata          : {}         #>
+ 
+        $stepName = "[$fn]: Filter to specific report among the reports"
+        #--------------------------------------------
+        Write-Verbose $stepName 
+ 
+        if ($ReportName.Trim().Length -gt 0)
+        {
+            <#             #Combine the folder and the report name to form full path (without the file extension if any)             $reportFullPath =  Join-Path `                                 -Path $ReportFolderPath `                                 -ChildPath ([system.io.fileinfo]$ReportName).BaseName             #>
+ 
+            #Not doing it with the full path would allow us to search all reports in all paths by name starting from the root!
+            $report = ($reports |
+                            Where-Object {$_.Name -eq ([system.io.fileinfo]$ReportName).BaseName}) #Eliminate file extension
+ 
+            $returnObj = @($report)
+        }
+        else
+        {
+            $returnObj = $reports
+        }
+ 
+        #Return value
+        ,$returnObj       
+ 
+    }
+    catch
+    {
+        [Exception]$ex = $_.Exception
+        Throw "Unable to get SSRS reports. Error in step: `"{0}]`" `n{1}" -f `
+                        $stepName, $ex.Message
+    }
+    finally
+    {
+        #Return value if any
+    }
+}
+$ReportServerUri = 'http://gbd-cloud-reporting-dev2.us.ad.wellpoint.com/ReportServer'
+    $SSRS = Get-SSRS -ReportServerUri $ReportServerUri 
+ $Array = @()
+    $reports = Get-SSRSReport -ReportServerUri $ReportServerUri -ReportFolderPath '/Managed'
+    Get-RsDataSource -ReportServerUri $ReportServerUri -DataSourcePath '/Managed'
+    #$reports|Select-Object Path, ModifiedBy|
+    Where-Object {($_.TypeName -eq 'Report') -and ($_.Path -like "*REPORT_PORTAL*")} #|Format-Table 
+    #Where-Object {($_.Path -like "*DCC*" -or $_.Path -like "*Document Management*")}|Format-Table 
+    foreach($report in $reports)
+    {
+ 
+    $dataSources = $SSRS.GetItemDataSources($report.Path)
+    foreach($datasource in $dataSources)
+    {
+    Write-Host $dataSource.Name 
+    Write-host $dataSource.ConnectionProperties.ConnectString
+    Write-host $report.Path 
+
+    <#$Row = "" | Select DSName,Connectionstring,ReportPath
+    $Row.DSName = $dataSources.Name 
+    $Row.Connectionstring = $dataSources.ConnectionString 
+    $Row.ReportPath = $report.Path
+    $Array += $Row#>
+       }
+    }
+
+  #  $Array | Out-File "\\va01pstodfs003.corp.agp.ads\files\VA1\Public\Cognizant\Team\AIA Team\MF2_AIA\GBD Enrollment Medicaid SSRS\apm1078786.csv"
