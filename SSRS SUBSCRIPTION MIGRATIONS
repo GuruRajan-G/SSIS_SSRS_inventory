@@ -1,0 +1,9 @@
+cls
+$ReportNames= @(
+"BillingBatchErrorLog"
+)
+FOREACH ($ReportName in $ReportNames)
+{
+Get-RsSubscription -ReportServerUri 'https://gbd-cloud-reporting-dev2.us.ad.wellpoint.com/ReportServer' -RsItem "/Managed/BFI/BOSS/Medicaid/INMCD/$ReportName"|Export-RsSubscriptionXml "C:\Users\AN563107AD\Downloads\$ReportName.xml"
+Import-RsSubscriptionXml  C:\Users\AN563107AD\Downloads\$ReportName.xml -ReportServerUri 'https://gbd-cloud-reporting-qa.us.ad.wellpoint.com/ReportServer'| Copy-RsSubscription -ReportServerUri 'https://gbd-cloud-reporting-qa.us.ad.wellpoint.com/ReportServer' -RsItem "/Managed/BFI/BOSS/Medicaid/INMCD/$ReportName"
+}
