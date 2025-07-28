@@ -1,0 +1,72 @@
+cls
+$SSRSAPI="http://gbd-cloud-reporting.us.ad.wellpoint.com/ReportServer"
+$GFolderLevel="SSRS"
+$GAPMNUMBER="APM1027285"
+$Gpattern="*1027285*"
+$GEnvironment="PLAT"
+$FolderLevel=$GFolderLevel
+$APMNUMBER=$GAPMNUMBER
+$pattern=$Gpattern
+$Environment=$GEnvironment
+$ExtractFilename=$APMNUMBER+"_"+$Environment+"_"+$FolderLevel
+$Array = @()
+$ReportServerUri = $SSRSAPI
+$username="XXXXX"
+$password=ConvertTo-SecureString "XXXXXX" -AsPlainText -Force
+$cred= New-Object System.Management.Automation.PSCredential($username,$password)
+#OLDCODE Connect-RsReportServer -ReportServerUri $ReportServerUri -Credential $cred
+$rsProxy = New-RsWebServiceProxy -ReportServerUri $ReportServerUri -Credential $cred
+#OLDCODE $Reports = Get-RsFolderContent -ReportServerUri $ReportServerUri -RsFolder '/Managed/Finance Systems/EPAS' -Recurse |Where-Object {$_.TypeName -eq 'Report'}
+$Reports = Get-RsFolderContent -Proxy $rsProxy -RsFolder '/Managed/Pega Claims Repair' -Recurse |Where-Object {$_.TypeName -eq 'Report'}
+foreach ($Report in $Reports)
+{
+#$Report
+Write-Host "Report Name: $($Report.Name)"
+#$Report.Path
+#$DataSources = Get-RsItemDataSource -ReportServerUri $ReportServerUri -RsItem $Report.Path
+#oldcode $DataSourcesReferences =Get-RsItemReference -Path $Report.Path
+$DataSourcesReferences =Get-RsItemReference -Proxy $rsProxy -Path $Report.Path
+foreach($DataSource in $DataSourcesReferences)
+{
+#write-host "reference $DataSource.Reference "
+IF($DataSource.Reference -ne $null)
+{
+#$DataSource
+#oldcode $ConnectionString=ReportingServicesTools\Get-RsDataSource -ReportServerUri $ReportServerUri -Path $DataSource.Reference
+$ConnectionString=ReportingServicesTools\Get-RsDataSource -Proxy $rsProxy -Path $DataSource.Reference
+#$ConnectionString
+#Write-Host "Datasource Name: $($DataSource.Name)"
+#Write-Host "DataSource Connection String: $($ConnectionString.ConnectString) and UserName: $($ConnectionString.UserName)"
+$Row = "" | Select ReportID,ReportName,ReportPath,TypeName,ModifidedDate,ModifiedBy,DataSourceName,DataSourcePath,ConnectionString,UserName
+$Row.ReportID=$Report.ID
+$Row.ReportName=$Report.Name
+$Row.ReportPath=$Report.Path
+$Row.TypeName=$Report.TypeName
+$Row.ModifidedDate=$Report.ModifiedDate
+$Row.ModifiedBy=$Report.ModifiedBy
+$Row.DataSourceName=$DataSource.Name
+$Row.DataSourcePath=$DataSource.Reference
+$Row.ConnectionString=$ConnectionString.ConnectString
+$Row.UserName=$ConnectionString.UserName
+$Array += $Row
+}
+ELSE
+{
+$Row = "" | Select ReportID,ReportName,ReportPath,TypeName,ModifidedDate,ModifiedBy,DataSourceName,DataSourcePath,ConnectionString,UserName
+$Row.ReportID=$Report.ID
+$Row.ReportName=$Report.Name
+$Row.ReportPath=$Report.Path
+$Row.TypeName=$Report.TypeName
+$Row.ModifidedDate=$Report.ModifiedDate
+$Row.ModifiedBy=$Report.ModifiedBy
+$Row.DataSourceName=$DataSource.Name
+$Row.DataSourcePath="Not Mapped"
+$Row.ConnectionString="Not Mapped"
+$Row.UserName="Not Mapped"
+$Array += $Row
+
+}
+}
+}
+#$Array |Export-Excel -Path "C:\Users\AN563107AD\SSRSEXTRACT\FICR_PLATINUM_SSRS_EXTRACT.xlsx" -AutoSize -TableStyle Medium2 -Numberformat "@" 
+$Array |Export-Excel -Path "C:\Users\AL91261\TidalAutomation\MappingExcel\$ExtractFilename.xlsx" -WorksheetName "SSRS_Extract" -TableStyle Medium2 -AutoSize -Numberformat "@"
